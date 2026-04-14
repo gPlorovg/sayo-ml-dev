@@ -1,29 +1,26 @@
 """
 {class_name} — STT adapter.
 
-TODO: Describe the model and its capabilities.
-
-Requires:
-    TODO: list pip packages
+Implement this adapter by wiring your model framework into:
+  - load(): initialize model and load weights
+  - transcribe(): offline inference -> STTResult
+  - transcribe_stream(): streaming inference
 """
 
 from __future__ import annotations
 
-import logging
-import time
 from typing import Iterator
 
 import numpy as np
+import structlog
 
 from ..base import BaseSTTModel, STTConfig, STTResult
-from ..registry import ModelRegistry
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
-@ModelRegistry.register("{adapter}")
 class {class_name}(BaseSTTModel):
-    """TODO: Adapter description."""
+    """Adapter scaffold for model type '{adapter}'."""
 
     def __init__(self) -> None:
         self._model = None
@@ -33,57 +30,33 @@ class {class_name}(BaseSTTModel):
 
     def load(self, config: STTConfig) -> None:
         self._config = config
-        logger.info("Loading model '%s' on device '%s'...",
-                    config.model_id, config.device)
+        logger.info("Loading model", model_id=config.model_id, device=config.device)
 
         # TODO: Load your model here
         # self._model = ...
 
-        logger.info("Model loaded.")
+        # Fail fast for unimplemented scaffolds to avoid silent empty results.
+        raise NotImplementedError(
+            "Adapter '{class_name}' is scaffold-only. "
+            "Implement load() and remove this exception."
+        )
+        logger.info("Model loaded", model_id=config.model_id)
 
     def transcribe(self, audio: np.ndarray) -> STTResult:
         self._assert_loaded()
-
-        t0 = time.perf_counter()
-
-        # TODO: Implement transcription
-        text = ""
-
-        elapsed = time.perf_counter() - t0
-        duration_s = len(audio) / self._config.sample_rate
-        rtf = elapsed / duration_s if duration_s > 0 else 0.0
-
-        return STTResult(
-            transcript=text,
-            is_final=True,
-            confidence=0.0,
-            latency_ms=elapsed * 1000,
-            metadata={{"adapter": "{adapter}", "rtf": round(rtf, 4)}},
+        raise NotImplementedError(
+            "Implement transcribe() for adapter '{class_name}'."
         )
 
     def transcribe_stream(
         self,
         audio_chunks: Iterator[np.ndarray],
     ) -> Iterator[STTResult]:
-        """Chunk-by-chunk inference (implement if model supports streaming)."""
+        """Chunk-by-chunk inference."""
         self._assert_loaded()
-
-        chunk_idx = 0
-        for chunk in audio_chunks:
-            chunk_idx += 1
-            t0 = time.perf_counter()
-
-            # TODO: Implement streaming transcription
-            text = ""
-
-            elapsed = time.perf_counter() - t0
-            yield STTResult(
-                transcript=text,
-                is_final=False,
-                confidence=0.0,
-                latency_ms=elapsed * 1000,
-                metadata={{"adapter": "{adapter}", "chunk_idx": chunk_idx}},
-            )
+        raise NotImplementedError(
+            "Implement transcribe_stream() for adapter '{class_name}'."
+        )
 
     def unload(self) -> None:
         if self._model is not None:
@@ -102,7 +75,6 @@ class {class_name}(BaseSTTModel):
     def model_info(self) -> dict:
         return {{
             "name": "{class_name}",
-            "streaming": False,
         }}
 
     # ── Internal ─────────────────────────────────────────────────────

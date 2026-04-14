@@ -61,7 +61,6 @@ class ModelParameters:
     description: str
     language_code: str
     sample_rate: int
-    streaming: bool
 
 
 @dataclass
@@ -168,7 +167,6 @@ def _read_model_parameters(yaml_path: Path) -> ModelParameters:
         description=str(raw.get("description", "")),
         language_code=str(raw.get("language_code", "")),
         sample_rate=int(raw.get("sample_rate", "")),
-        streaming=bool(raw.get("streaming", "")),
     )
     return model
 
@@ -337,9 +335,6 @@ def _interactive_wizard() -> ModelParameters:
             console.print(_t("sample_rate_invalid"))
             continue
 
-    # ── Streaming ────────────────────────────────────────────────────
-    streaming = Confirm.ask(_t("prompt_streaming"), default=False)
-
     # ── Confirmation ─────────────────────────────────────────────────
     console.print()
     console.print(Rule(_t("review"), style="bright_cyan"))
@@ -364,7 +359,6 @@ def _interactive_wizard() -> ModelParameters:
         _t("p_language"), f"{language} ({LANGUAGE_CHOICES.get(language, '?')})"
     )
     model_summary.add_row(_t("p_sample_rate"), f"{sample_rate} Hz")
-    model_summary.add_row(_t("p_streaming"), _t("yes") if streaming else _t("no"))
     console.print(model_summary)
     console.print()
     if not reuse_adapter:
@@ -390,7 +384,6 @@ def _interactive_wizard() -> ModelParameters:
         description=description,
         language_code=language,
         sample_rate=sample_rate,
-        streaming=streaming,
     )
 
 
@@ -419,7 +412,6 @@ def _scaffold(params: ModelParameters) -> ScaffoldResult:
             description=params.description,
             language_code=params.language_code,
             sample_rate=params.sample_rate,
-            streaming=str(params.streaming).lower(),
         )
         yaml_path.write_text(content, encoding="utf-8")
         results.yaml_created = True
@@ -437,7 +429,6 @@ def _scaffold(params: ModelParameters) -> ScaffoldResult:
             class_name=class_name,
             model_id=params.id,
             sample_rate=params.sample_rate,
-            streaming=params.streaming,
         )
         adapter_file.write_text(content, encoding="utf-8")
         results.adapter_created = True
@@ -521,7 +512,6 @@ def _print_result(result: ScaffoldResult) -> None:
     params_table.add_row("description", model_parameters.description)
     params_table.add_row("language_code", model_parameters.language_code)
     params_table.add_row("sample_rate", str(model_parameters.sample_rate))
-    params_table.add_row("streaming", str(model_parameters.streaming).lower())
     console.print(
         Panel(
             params_table,
@@ -610,7 +600,6 @@ def main():
             description="TODO: describe your model",
             language_code="en",
             sample_rate=16000,
-            streaming=False,
         )
     else:
         params = _interactive_wizard()
