@@ -19,7 +19,7 @@ latency: 0.0
 
 # Dependencies
 dependencies:
-  # Python dependencies required by this model adapter/runtime.
+  # Python dependencies required by this model adapter.
   packages: []
     # - "torch>=2.1.0"
   # Optional file with additional python dependencies (relative to model dir).

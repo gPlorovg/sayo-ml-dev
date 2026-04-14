@@ -35,7 +35,7 @@ class {class_name}(BaseSTTModel):
         # TODO: Load your model here
         # self._model = ...
 
-        # Fail fast for unimplemented scaffolds to avoid silent empty results.
+        # Fail fast for unimplemented scaffolds
         raise NotImplementedError(
             "Adapter '{class_name}' is scaffold-only. "
             "Implement load() and remove this exception."
@@ -70,12 +70,6 @@ class {class_name}(BaseSTTModel):
     @property
     def is_loaded(self) -> bool:
         return self._model is not None
-
-    @property
-    def model_info(self) -> dict:
-        return {{
-            "name": "{class_name}",
-        }}
 
     # ── Internal ─────────────────────────────────────────────────────
 
