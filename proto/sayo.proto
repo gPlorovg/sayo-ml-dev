@@ -20,9 +20,10 @@ message ModelDescriptor {
   string description = 2;
   string language_code = 3;
   int32 sample_rate_hertz = 4;
-  int32 min_vad_silence_ms = 5;
-  float default_vad_threshold = 6;
+  AudioQuantization audio_quantization = 5;
+  int32 chunk_duration_ms = 6;
   bool supports_interim_results = 7;
+  float latency_ms = 8;
 }
 
 message StreamingRecognizeRequest {
