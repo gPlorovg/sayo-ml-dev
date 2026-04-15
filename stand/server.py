@@ -8,83 +8,196 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib
 import os
-import time
+from contextlib import suppress
+from queue import Queue
 from pathlib import Path
+from typing import Any
 
 import grpc
 import numpy as np
 import structlog
 
 from model_repository.model_repository import ModelRepository
+from proto import sayo_pb2, sayo_pb2_grpc
 
 logger = structlog.get_logger("stand.server")
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-# TODO: определиться с расположением скомплированных proto файлов
-def _load_proto_modules():
-    """Try several common generated proto package locations."""
-    module_roots = [
-        os.environ.get("SAYO_PROTO_PY_PACKAGE", "").strip(),
-        "generated",
-        "proto.generated",
-        "stand.generated",
-        "",
-    ]
-
-    for mod_root in module_roots:
-        if not mod_root:
-            candidates = ["sayo_pb2", "sayo_pb2_grpc"]
-        else:
-            candidates = [f"{mod_root}.sayo_pb2", f"{mod_root}.sayo_pb2_grpc"]
-
-        try:
-            pb2 = importlib.import_module(candidates[0])
-            pb2_grpc = importlib.import_module(candidates[1])
-            return pb2, pb2_grpc
-        except ImportError:
-            continue
-
-    raise RuntimeError(
-        "Could not import generated gRPC modules (sayo_pb2, sayo_pb2_grpc). "
-        "Set SAYO_PROTO_PY_PACKAGE or place generated modules on PYTHONPATH."
-    )
-
-
-sayo_pb2, sayo_pb2_grpc = _load_proto_modules()
-
-
 class StandSayoService(sayo_pb2_grpc.SayoServiceServicer):
-    def __init__(self, adapter, sample_rate: int = 16_000):
+    def __init__(
+        self,
+        adapter,
+        model_entry: Any,
+    ):
         self._adapter = adapter
-        self._sample_rate = sample_rate
+        self._model_entry = model_entry
+        self._sample_rate = model_entry.sample_rate
 
-    # TODO: заменить на health check
-    async def Ping(self, request, context):
-        return sayo_pb2.PingResponse(message="pong")
+    async def HealthCheck(self, request, context):
+        runtime = (
+            self._model_entry.runtime
+            if isinstance(self._model_entry.runtime, dict)
+            else {}
+        )
+        default_quantization = runtime.get("audio_quantization", "pcm_f32le")
+        quantization = (
+            sayo_pb2.AUDIO_QUANTIZATION_PCM_S16LE
+            if str(default_quantization).lower() == "pcm_s16le"
+            else sayo_pb2.AUDIO_QUANTIZATION_PCM_F32LE
+        )
+        descriptor = sayo_pb2.ModelDescriptor(
+            model_id=self._model_entry.model_id,
+            description=self._model_entry.description,
+            language_code=self._model_entry.language_code,
+            sample_rate_hertz=self._model_entry.sample_rate,
+            audio_quantization=quantization,
+            chunk_duration_ms=int(runtime.get("chunk_duration_ms", 560)),
+            supports_interim_results=bool(
+                runtime.get("supports_interim_results", True)
+            ),
+            latency_ms=float(self._model_entry.latency),
+        )
+        return sayo_pb2.HealthCheckResponse(
+            ready=True,
+            message="stand is ready",
+            models=[descriptor],
+        )
+
+    @staticmethod
+    def _chunk_to_f32(audio_chunk: bytes, quantization: int) -> np.ndarray:
+        if quantization == sayo_pb2.AUDIO_QUANTIZATION_PCM_S16LE:
+            pcm16 = np.frombuffer(audio_chunk, dtype=np.int16)
+            return (pcm16.astype(np.float32) / 32768.0).copy()
+
+        # Default/fallback: treat chunk as float32 little-endian PCM.
+        return np.frombuffer(audio_chunk, dtype=np.float32).copy()
+
+    @staticmethod
+    def _safe_response(
+        transcript: object,
+        is_final: object,
+        confidence: object,
+        metadata: dict[str, object] | None = None,
+    ) -> sayo_pb2.StreamingRecognizeResponse:
+        safe_meta: dict[str, str] = {}
+        if metadata:
+            for key, value in metadata.items():
+                safe_meta[str(key)] = str(value)
+
+        return sayo_pb2.StreamingRecognizeResponse(
+            transcript="" if transcript is None else str(transcript),
+            is_final=bool(is_final),
+            confidence=float(confidence) if confidence is not None else 0.0,
+            metadata=safe_meta,
+        )
 
     async def StreamingRecognize(self, request_iterator, context):
         config = None
-        audio_buffer = bytearray()
         chunk_count = 0
+        input_queue: Queue[np.ndarray | None] = Queue()
+        result_queue: asyncio.Queue[Any | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        worker_task: asyncio.Task | None = None
+
+        def run_adapter_stream() -> None:
+            def chunk_iter():
+                while True:
+                    item = input_queue.get()
+                    if item is None:
+                        break
+                    yield item
+
+            try:
+                for result in self._adapter.transcribe_stream(chunk_iter()):
+                    loop.call_soon_threadsafe(result_queue.put_nowait, result)
+            except Exception as exc:
+                loop.call_soon_threadsafe(result_queue.put_nowait, exc)
+            finally:
+                loop.call_soon_threadsafe(result_queue.put_nowait, None)
+
+        async def emit_ready_results() -> list[sayo_pb2.StreamingRecognizeResponse]:
+            ready: list[sayo_pb2.StreamingRecognizeResponse] = []
+            while True:
+                try:
+                    result = result_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+                if result is None:
+                    break
+                if isinstance(result, Exception):
+                    raise result
+
+                transcript = getattr(result, "transcript", "")
+                is_final = getattr(result, "is_final", False)
+                confidence = getattr(result, "confidence", 0.0)
+                if not transcript and not is_final:
+                    continue
+
+                ready.append(
+                    self._safe_response(
+                        transcript=transcript,
+                        is_final=is_final,
+                        confidence=confidence,
+                        metadata={
+                            "latency_ms": f"{getattr(result, 'latency_ms', 0.0):.1f}",
+                            "chunks": chunk_count,
+                            "model_id": self._model_entry.model_id,
+                            "stream_mode": "incremental",
+                            **(getattr(result, "metadata", {}) or {}),
+                        },
+                    )
+                )
+            return ready
 
         try:
             async for request in request_iterator:
                 if request.HasField("config"):
+                    if config is not None:
+                        await context.abort(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            "Config must be sent only once as first message",
+                        )
+                        return
+
                     config = request.config
                     logger.info(
                         "Config received",
                         model_id=config.model_id,
                         language_code=config.language_code,
                         sample_rate_hertz=config.sample_rate_hertz,
-                        dry_run=config.dry_run,
+                        interim_results=config.interim_results,
+                        chunk_duration_ms=config.chunk_duration_ms,
+                    )
+
+                    if (
+                        config.model_id
+                        and config.model_id != self._model_entry.model_id
+                    ):
+                        await context.abort(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            f"Unknown model_id '{config.model_id}' for this stand",
+                        )
+                        return
+                    if (
+                        config.sample_rate_hertz
+                        and config.sample_rate_hertz != self._sample_rate
+                    ):
+                        await context.abort(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            "sample_rate_hertz must match model sample rate. "
+                            "Resample audio on client side before streaming.",
+                        )
+                        return
+                    worker_task = asyncio.create_task(
+                        asyncio.to_thread(run_adapter_stream)
                     )
                     continue
 
-                if not request.HasField("audio_content"):
+                if not request.HasField("audio_chunk"):
                     continue
 
                 if config is None:
@@ -95,76 +208,79 @@ class StandSayoService(sayo_pb2_grpc.SayoServiceServicer):
                     return
 
                 chunk_count += 1
-                # TODO: убрать dry_run
-                if config.dry_run:
-                    yield sayo_pb2.StreamingRecognizeResponse(
-                        transcript="",
-                        is_final=False,
-                        confidence=0.0,
-                        metadata={"mode": "dry_run", "chunks": str(chunk_count)},
+                input_queue.put(
+                    self._chunk_to_f32(
+                        request.audio_chunk,
+                        config.audio_quantization,
                     )
+                )
+                for item in await emit_ready_results():
+                    yield item
+
+            if config is None:
+                await context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "Config was not received",
+                )
+                return
+
+            input_queue.put(None)
+            if worker_task is None:
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    "Adapter streaming worker was not initialized",
+                )
+                return
+
+            done = False
+            while not done:
+                result = await result_queue.get()
+                if result is None:
+                    done = True
                     continue
-
-                audio_buffer.extend(request.audio_content)
-
-                # Expect float32 mono chunks; process each ~1 second.
-                samples_in_buffer = len(audio_buffer) // 4
-                if samples_in_buffer < self._sample_rate:
+                if isinstance(result, Exception):
+                    raise result
+                transcript = getattr(result, "transcript", "")
+                is_final = getattr(result, "is_final", False)
+                confidence = getattr(result, "confidence", 0.0)
+                if not transcript and not is_final:
                     continue
-
-                audio_np = np.frombuffer(bytes(audio_buffer), dtype=np.float32)
-                audio_buffer.clear()
-
-                t0 = time.perf_counter()
-                result = self._adapter.transcribe(audio_np)
-                elapsed = time.perf_counter() - t0
-
-                yield sayo_pb2.StreamingRecognizeResponse(
-                    transcript=result.transcript,
-                    is_final=False,
-                    confidence=result.confidence,
+                yield self._safe_response(
+                    transcript=transcript,
+                    is_final=is_final,
+                    confidence=confidence,
                     metadata={
-                        "latency_ms": f"{elapsed * 1000:.1f}",
-                        "chunks": str(chunk_count),
+                        "latency_ms": f"{getattr(result, 'latency_ms', 0.0):.1f}",
+                        "chunks": chunk_count,
+                        "model_id": self._model_entry.model_id,
+                        "stream_mode": "incremental",
+                        **(getattr(result, "metadata", {}) or {}),
                     },
                 )
-            # TODO: VAD будет изменять размер чанков для транскрибации
-            if config is not None and not config.dry_run and audio_buffer:
-                audio_np = np.frombuffer(bytes(audio_buffer), dtype=np.float32)
-                t0 = time.perf_counter()
-                result = self._adapter.transcribe(audio_np)
-                elapsed = time.perf_counter() - t0
-                yield sayo_pb2.StreamingRecognizeResponse(
-                    transcript=result.transcript,
-                    is_final=True,
-                    confidence=result.confidence,
-                    metadata={
-                        "latency_ms": f"{elapsed * 1000:.1f}",
-                        "total_chunks": str(chunk_count),
-                    },
-                )
-            else:
-                yield sayo_pb2.StreamingRecognizeResponse(
-                    transcript="",
-                    is_final=True,
-                    confidence=0.0,
-                    metadata={"total_chunks": str(chunk_count)},
-                )
+
+            await worker_task
 
         except Exception as exc:
             logger.exception("StreamingRecognize failed", error=str(exc))
             raise
+        finally:
+            input_queue.put(None)
+            if worker_task is not None and not worker_task.done():
+                worker_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await worker_task
 
 
 async def serve(model_name: str, device: str, port: int, models_dir: str):
     model_repo = ModelRepository.from_model_dir(models_dir, model_name)
+    entry = model_repo.entry
 
     logger.info("Loading model", model=model_name, device=device)
     adapter = model_repo.create_adapter(device=device, auto_load=True)
 
     server = grpc.aio.server()
     sayo_pb2_grpc.add_SayoServiceServicer_to_server(
-        StandSayoService(adapter, sample_rate=model_repo.entry.sample_rate),
+        StandSayoService(adapter, model_entry=entry),
         server,
     )
 
