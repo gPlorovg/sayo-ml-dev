@@ -1,49 +1,77 @@
-## Sayo ML Dev Tooling
+## Sayo ML Dev
 
-Local-first tooling for ML developers to prepare and test STT models with a minimal gRPC stand.
+Local tooling to scaffold STT models, build Docker images, and run a small **gRPC stand** for integration tests.
 
-### What is included
+### Layout
 
-- `wizard`: scaffolds a model directory and adapter template.
-- `model_repository`: unified interface (`ModelRepository`) used by adapters and stand.
-- `stand`: local gRPC server layer over a per-model image.
+| Path | Role |
+|------|------|
+| `wizard/` | Scaffold `models/<name>/` and adapter stub |
+| `model_repository/` | `ModelRepository`, adapters (e.g. NeMo) |
+| `stand/server.py` | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
+| `stand/client.py` | Test client (WAV / mic → stream) |
+| `proto/sayo.proto` | API contract; generated stubs in `proto/` |
+| `model_build.py` | Build model image and stand image |
 
-This repository currently focuses on ML developer workflow and local integration testing.
-`prod-runtime` is intentionally out of scope here.
+### Model directory (`models/<name>/`)
 
-### Model directory contract
+- `model.yaml` — `id`, `adapter`, `language_code`, `sample_rate`, `latency`, optional `runtime` (e.g. `chunk_duration_ms`, `audio_quantization`, `supports_interim_results`), `weights.artifacts`
+- `requirements.lock`, `system-packages.txt`
+- `weights/` — local weights (mounted into containers)
 
-Each model lives in `models/<model_name>/` and contains:
+### Environment
 
-- `model.yaml` - model metadata, adapter name, runtime hints, and `weights.artifacts`.
-- `requirements.lock` - Python runtime deps for this model.
-- `system-packages.txt` - optional OS packages (one per line).
-- `weights/` - local folder for model weights during local runs.
+```bash
+uv sync
+uv sync --group dev   # grpc_tools, ruff, sound libs for client / protoc
+```
 
-### Create a model scaffold
+For a full locked runtime (includes `grpcio`), use `requirements.txt` as needed.
 
+### Scaffold a new model
+```bash
+python -m wizard.cli --help
+```
 ```bash
 python -m wizard.cli
 ```
 
-### Build images (base -> per-model -> stand)
+Regenerate Python stubs after editing `proto/sayo.proto`:
 
 ```bash
-./model_build.sh <model_name>
+uv run python -m grpc_tools.protoc -I . --python_out=. --grpc_python_out=. proto/sayo.proto
+```
+
+### Build and run stand (Docker)
+
+```bash
+python model_build.py <model_name>
 ```
 
 Example:
 
 ```bash
-./model_build.sh nemo
+python model_build.py nemo
 ```
-
-### Run local gRPC stand
 
 ```bash
-docker run \
-  -v /path/to/weights:/app/models/<model_name>/weights \
+docker run --gpus all \
+  -v /path/to/repo/models/nemo/weights:/app/models/nemo/weights \
   -p 50051:50051 \
-  sayo-stand-<model_name>:latest \
-  --model <model_name>
+  sayo-stand-nemo:latest \
+  --model nemo --device cuda
 ```
+
+The stand loads one model from `model.yaml`. **Resample audio on the client** so `StreamingConfig.sample_rate_hertz` matches the model (see `HealthCheck` / `ModelDescriptor`).
+
+### Test client
+
+Uses `HealthCheck` → first `ModelDescriptor` for sample rate, chunk duration, and quantization.
+
+```bash
+uv run python stand/client.py --host 127.0.0.1 --port 50051 --audio path/to.wav
+uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic --mic-duration-s 5
+uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic-live
+```
+
+Optional: record WAV to `test_audio/` with `utils/record_waw.py`.
