@@ -56,7 +56,7 @@ I18N = {
         "step3": "Place weights in {weights_rel}/",
         "step4": "python model_build.py {model_name}",
         "step4_desc": "  Build Docker image with model dependencies.",
-        "step5": "docker run -v /path/to/weights:/app/models/{model_name}/weights -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name}",
+        "step5": "docker run --gpus all -v /path/to/weights:/app/models/{model_name}/weights -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name} --device cuda",
         "step5_desc": "  Start local gRPC stand with the model.",
     },
     "ru": {
@@ -114,7 +114,7 @@ I18N = {
         "step3": "Положите веса в {weights_rel}/",
         "step4": "python model_build.py {model_name}",
         "step4_desc": "  Соберите Docker-образ с зависимостями модели.",
-        "step5": "docker run -v /path/to/weights:/app/models/{model_name}/weights -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name}",
+        "step5": "docker run --gpus all -v /path/to/weights:/app/models/{model_name}/weights -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name} --device cuda",
         "step5_desc": "  Запустите локальный gRPC стенд с моделью.",
     },
 }
