@@ -1,6 +1,7 @@
 sandbox/
 out/
 test_audio/
+models/*/weights/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

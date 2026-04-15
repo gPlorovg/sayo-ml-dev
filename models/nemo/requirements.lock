@@ -1,0 +1,8 @@
+numpy>=2.4.4
+structlog>=25.5.0
+pyyaml>=6.0.3
+grpcio>=1.76.0
+nemo_toolkit[asr]>=2.0.0
+torch>=2.1.0
+torchaudio>=2.1.0
+omegaconf>=2.3.0
