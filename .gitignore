@@ -1,3 +1,6 @@
+sandbox/
+out/
+test_audio/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
