@@ -69,6 +69,8 @@ class ScaffoldResult:
     model_dir_created: bool = False
     yaml_created: bool = False
     weights_dir_created: bool = False
+    requirements_lock_created: bool = False
+    system_packages_created: bool = False
     adapter_created: bool = False
 
 
@@ -391,7 +393,10 @@ def _scaffold(params: ModelParameters) -> ScaffoldResult:
     class_name = _to_class_name(params.adapter)
     model_dir = MODELS_DIR / params.name
     adapter_file = ADAPTERS_DIR / f"{params.adapter}.py"
+    adapters_init = ADAPTERS_DIR / "__init__.py"
     yaml_path = model_dir / "model.yaml"
+    requirements_lock_path = model_dir / "requirements.lock"
+    system_packages_path = model_dir / "system-packages.txt"
 
     results = ScaffoldResult(model_params=params)
 
@@ -399,9 +404,13 @@ def _scaffold(params: ModelParameters) -> ScaffoldResult:
         model_dir.mkdir(parents=True)
         results.model_dir_created = True
 
+    ADAPTERS_DIR.mkdir(parents=True, exist_ok=True)
+    if not adapters_init.exists():
+        adapters_init.write_text('"""Model adapters package."""\n', encoding="utf-8")
+
     if not (model_dir / "weights").exists():
         (model_dir / "weights").mkdir()
-        results.weights_created = True
+        results.weights_dir_created = True
 
     if not yaml_path.exists():
         template = _load_template("model.yaml.tpl")
@@ -421,6 +430,26 @@ def _scaffold(params: ModelParameters) -> ScaffoldResult:
         except ValueError:
             log.error("Existing model.yaml is invalid", path=yaml_path)
             sys.exit(1)
+
+    if not requirements_lock_path.exists():
+        requirements_lock_path.write_text(
+            "# Pin model runtime dependencies here.\n"
+            "# Example:\n"
+            "# torch==2.8.0\n"
+            "# transformers==4.56.2\n",
+            encoding="utf-8",
+        )
+        results.requirements_lock_created = True
+
+    if not system_packages_path.exists():
+        system_packages_path.write_text(
+            "# Optional OS packages, one per line.\n"
+            "# Example:\n"
+            "# ffmpeg\n"
+            "# libsndfile1\n",
+            encoding="utf-8",
+        )
+        results.system_packages_created = True
 
     if not adapter_file.exists():
         template = _load_template("adapter.py.tpl")
@@ -462,16 +491,44 @@ def _print_result(result: ScaffoldResult) -> None:
             f"[green]✓[/green] [bold]model.yaml[/bold]  [dim]- {_t('config')}[/dim]"
         )
         model_branch.add(
+            "[green]✓[/green] [bold]requirements.lock[/bold]  "
+            f"[dim]- {_t('python_deps')}[/dim]"
+        )
+        model_branch.add(
+            "[green]✓[/green] [bold]system-packages.txt[/bold]  "
+            f"[dim]- {_t('system_deps')}[/dim]"
+        )
+        model_branch.add(
             f"[green]✓[/green] [dim]weights/[/dim]  [dim]- {_t('place_weights')}[/dim]"
         )
     else:
         if result.yaml_created:
             model_branch.add(
-                f"[green]✓[/green] [dim]weights/[/dim]  [dim]- {_t('place_weights')}[/dim]"
+                f"[green]✓[/green] [bold]model.yaml[/bold]  [dim]- {_t('config')}[/dim]"
             )
         else:
             model_branch.add(
                 f"[yellow]⚠[/yellow] [bold]model.yaml[/bold]  [dim]- {_t('already_exists')}[/dim]"
+            )
+        if result.requirements_lock_created:
+            model_branch.add(
+                "[green]✓[/green] [bold]requirements.lock[/bold]  "
+                f"[dim]- {_t('python_deps')}[/dim]"
+            )
+        else:
+            model_branch.add(
+                "[yellow]⚠[/yellow] [bold]requirements.lock[/bold]  "
+                f"[dim]- {_t('already_exists')}[/dim]"
+            )
+        if result.system_packages_created:
+            model_branch.add(
+                "[green]✓[/green] [bold]system-packages.txt[/bold]  "
+                f"[dim]- {_t('system_deps')}[/dim]"
+            )
+        else:
+            model_branch.add(
+                "[yellow]⚠[/yellow] [bold]system-packages.txt[/bold]  "
+                f"[dim]- {_t('already_exists')}[/dim]"
             )
         if result.weights_dir_created:
             model_branch.add(

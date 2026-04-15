@@ -1,0 +1,9 @@
+ARG MODEL_IMAGE
+FROM ${MODEL_IMAGE}
+
+WORKDIR /app
+
+# Add only the local stand layer on top of a per-model image.
+COPY stand/ /app/stand/
+
+CMD ["python", "-m", "stand.server"]

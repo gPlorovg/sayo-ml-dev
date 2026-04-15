@@ -5,8 +5,11 @@ description = "ML develop and testing tooling for SAYO system"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "grpcio>=1.76.0",
+    "numpy>=2.4.4",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
+    "soundfile>=0.13.1",
     "structlog>=25.5.0",
 ]
 

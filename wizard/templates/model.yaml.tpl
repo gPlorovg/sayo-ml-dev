@@ -17,22 +17,17 @@ sample_rate: {sample_rate}
 # Optional latency hint in milliseconds
 latency: 0.0
 
-# Dependencies
-dependencies:
-  # Python dependencies required by this model adapter.
-  packages: []
-    # - "torch>=2.1.0"
-  # Optional file with additional python dependencies (relative to model dir).
-  requirements_file: null
-  system_packages: []
-  # Local weight artifacts (relative paths) for embedded mode.
-  weights:
-    # - "weights/model.pt"
-  # Optional remote artifacts for on-demand download.
-  remote_weights:
-    # - uri: "https://example.com/model.pt"
+# Model artifacts.
+# Dependencies are declared in files next to this config:
+#   - requirements.lock
+#   - system-packages.txt
+weights:
+  revision: "v1"
+  artifacts:
+    # - path: "weights/model.safetensors"
+    #   uri: "https://example.com/model.safetensors"
     #   sha256: "<checksum>"
-    #   filename: "model.pt"
+    #   required: true
 
 # Runtime hints
 runtime:
