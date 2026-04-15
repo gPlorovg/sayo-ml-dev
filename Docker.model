@@ -9,13 +9,6 @@ ENV MODEL_NAME=${MODEL_NAME}
 
 WORKDIR /app
 
-# Copy only model runtime interfaces and the selected adapter.
-COPY model_repository/__init__.py /app/model_repository/__init__.py
-COPY model_repository/base.py /app/model_repository/base.py
-COPY model_repository/model_repository.py /app/model_repository/model_repository.py
-COPY model_repository/adapters/__init__.py /app/model_repository/adapters/__init__.py
-COPY model_repository/adapters/${ADAPTER_NAME}.py /app/model_repository/adapters/${ADAPTER_NAME}.py
-
 # Copy config and dependency files first to maximize layer cache reuse.
 COPY models/${MODEL_NAME}/model.yaml /app/models/${MODEL_NAME}/model.yaml
 COPY models/${MODEL_NAME}/requirements.lock /app/models/${MODEL_NAME}/requirements.lock
@@ -32,6 +25,13 @@ RUN apt-get update && \
 # Install Python dependencies from lock file using uv.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r /app/models/${MODEL_NAME}/requirements.lock
+
+# Copy only model runtime interfaces and the selected adapter.
+COPY model_repository/__init__.py /app/model_repository/__init__.py
+COPY model_repository/base.py /app/model_repository/base.py
+COPY model_repository/model_repository.py /app/model_repository/model_repository.py
+COPY model_repository/adapters/__init__.py /app/model_repository/adapters/__init__.py
+COPY model_repository/adapters/${ADAPTER_NAME}.py /app/model_repository/adapters/${ADAPTER_NAME}.py
 
 # Now copy the rest of the model directory (weights should be excluded via .dockerignore)
 COPY models/${MODEL_NAME}/ /app/models/${MODEL_NAME}/

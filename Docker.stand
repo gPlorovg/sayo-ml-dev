@@ -1,9 +1,21 @@
-ARG MODEL_IMAGE
+ARG MODEL_IMAGE=sayo-model-nemo:latest
 FROM ${MODEL_IMAGE}
 
 WORKDIR /app
 
 # Add only the local stand layer on top of a per-model image.
 COPY stand/ /app/stand/
+COPY proto/__init__.py /app/proto/__init__.py
+COPY proto/sayo.proto /app/proto/sayo.proto
 
-CMD ["python", "-m", "stand.server"]
+# Generate Python gRPC stubs inside the image to keep
+# protobuf gencode/runtime versions compatible.
+RUN python -m pip install --no-cache-dir "grpcio-tools==1.80.0" && \
+    python -m grpc_tools.protoc \
+      -I /app \
+      --python_out=/app \
+      --grpc_python_out=/app \
+      /app/proto/sayo.proto
+
+ENTRYPOINT ["python", "-m", "stand.server"]
+CMD []
