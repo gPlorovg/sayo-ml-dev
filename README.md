@@ -11,7 +11,8 @@ Local tooling to scaffold STT models, build Docker images, and run a small **gRP
 | `stand/server.py` | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
 | `stand/client.py` | Test client (WAV / mic → stream) |
 | `proto/sayo.proto` | API contract; generated stubs in `proto/` |
-| `model_build.py` | Build model image and stand image |
+| `model_build.py` | Build Docker images (`base` \| `model` \| `stand`) |
+| `Makefile` | Shortcuts for builds and `run-stand` |
 
 ### Model directory (`models/<name>/`)
 
@@ -44,15 +45,30 @@ uv run python -m grpc_tools.protoc -I . --python_out=. --grpc_python_out=. proto
 
 ### Build and run stand (Docker)
 
-```bash
-python model_build.py <model_name>
-```
-
-Example:
+Build targets are separate: **base** → **model** → **stand** (model and stand depend on the previous image).
 
 ```bash
-python model_build.py nemo
+python model_build.py base
+python model_build.py model <model_name>
+python model_build.py stand <model_name>
 ```
+
+Example (`nemo`):
+
+```bash
+python model_build.py base
+python model_build.py model nemo
+python model_build.py stand nemo
+```
+
+Or with **Make** (defaults `MODEL=nemo`; override with `make run-stand MODEL=nemo`):
+
+```bash
+make build-all          # base, model, stand in order
+make run-stand          # same as docker run below
+```
+
+The model image keeps `apt` / `uv pip` layers when only `model.yaml` or the adapter change; rebuild with `make build-model` (or `python model_build.py model <name>`) without rebuilding base.
 
 ```bash
 docker run --gpus all \

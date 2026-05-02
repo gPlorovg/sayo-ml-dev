@@ -12,7 +12,8 @@
 | `stand/server.py`   | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
 | `stand/client.py`   | Тестовый клиент (WAV / микрофон → поток)                |
 | `proto/sayo.proto`  | Контракт API; сгенерированные заглушки в `proto/`       |
-| `model_build.py`    | Сборка образа модели и образа стенда                    |
+| `model_build.py`    | Сборка образов (`base` \| `model` \| `stand`)           |
+| `Makefile`          | Команды сборки и `run-stand`                            |
 
 
 ### Каталог модели (`models/<name>/`)
@@ -47,14 +48,20 @@ uv run python -m grpc_tools.protoc -I . --python_out=. --grpc_python_out=. proto
 ### Сборка и запуск стенда (Docker)
 
 ```bash
-python model_build.py <model_name>
+python model_build.py base
+python model_build.py model <имя>
+python model_build.py stand <имя>
 ```
 
-Пример:
+Пример (`nemo`):
 
 ```bash
-python model_build.py nemo
+python model_build.py base
+python model_build.py model nemo
+python model_build.py stand nemo
 ```
+
+Через Make: `make build-all`, затем `make run-stand` (по умолчанию `MODEL=nemo`).
 
 ```bash
 docker run --gpus all \
