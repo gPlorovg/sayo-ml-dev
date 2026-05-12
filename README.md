@@ -9,7 +9,7 @@ Local tooling to scaffold STT models, build Docker images, and run a small **gRP
 | `wizard/` | Scaffold `models/<name>/` and adapter stub |
 | `model_repository/` | `ModelRepository`, adapters (e.g. NeMo) |
 | `stand/server.py` | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
-| `stand/client.py` | Test client (WAV / mic → stream) |
+| `stand/client.py` | gRPC test client (file / mic) |
 | `proto/sayo.proto` | API contract; generated stubs in `proto/` |
 | `model_build.py` | Build Docker images (`base` \| `model` \| `stand`) |
 | `Makefile` | Shortcuts for builds and `run-stand` |
@@ -82,12 +82,20 @@ The stand loads one model from `model.yaml`. **Resample audio on the client** so
 
 ### Test client
 
-Uses `HealthCheck` → first `ModelDescriptor` for sample rate, chunk duration, and quantization.
+One channel per run: `HealthCheck`, then `StreamingRecognize` using the model descriptor (sample rate, chunk duration, quantization). File and mic paths resample or chunk audio to match the server config.
 
 ```bash
 uv run python stand/client.py --host 127.0.0.1 --port 50051 --audio path/to.wav
-uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic --mic-duration-s 5
-uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic-live
+uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic   # Ctrl+C to stop
 ```
 
-Optional: record WAV to `test_audio/` with `utils/record_waw.py`.
+```bash
+make run-client-mic
+make run-client-file FILE=path/to.wav    # optional: HOST=... PORT=...
+```
+
+`--model` / `-m` must match the stand’s `model_id` when set. `--mic-device`: PortAudio input index or name substring if the default input is wrong or unset. `--send-delay-ms`: delay between chunks in file (and default silence) mode. `STAND_HOST`, `STAND_PORT`, and `STAND_MODEL` can be used instead of `--host`, `--port`, and `--model`.
+
+If neither `--audio` nor `--mic` is given, the client streams 5 seconds of silence. It prints a short summary block at exit.
+
+Optional: record WAV under `test_audio/` with `utils/record_waw.py`.

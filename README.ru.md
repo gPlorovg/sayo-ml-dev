@@ -10,7 +10,7 @@
 | `wizard/`           | Каркас `models/<name>/` и заглушка адаптера             |
 | `model_repository/` | `ModelRepository`, адаптеры (например NeMo)             |
 | `stand/server.py`   | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
-| `stand/client.py`   | Тестовый клиент (WAV / микрофон → поток)                |
+| `stand/client.py`   | Тестовый gRPC-клиент (файл / микрофон)                  |
 | `proto/sayo.proto`  | Контракт API; сгенерированные заглушки в `proto/`       |
 | `model_build.py`    | Сборка образов (`base` \| `model` \| `stand`)           |
 | `Makefile`          | Команды сборки и `run-stand`                            |
@@ -73,14 +73,22 @@ docker run --gpus all \
 
 Стенд загружает одну модель из `model.yaml`. **Ресемплируйте аудио на клиенте**, чтобы `StreamingConfig.sample_rate_hertz` совпадал с моделью (см. `HealthCheck` / `ModelDescriptor`).
 
-### Тестовый клиент
+### Тестовый клиент (`stand/client.py`)
 
-Использует `HealthCheck` → первый `ModelDescriptor` для частоты дискретизации, длительности чанка и квантизации.
+Один канал на запуск: `HealthCheck`, затем `StreamingRecognize` с параметрами из дескриптора модели (частота, длина чанка, квантизация). Режимы файла и микрофона приводят аудио к этим настройкам на клиенте.
 
 ```bash
 uv run python stand/client.py --host 127.0.0.1 --port 50051 --audio path/to.wav
-uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic --mic-duration-s 5
-uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic-live
+uv run python stand/client.py --host 127.0.0.1 --port 50051 --mic   # стоп: Ctrl+C
 ```
+
+```bash
+make run-client-mic
+make run-client-file FILE=path/to.wav    # при необходимости HOST=... PORT=...
+```
+
+`--model` / `-m` при указании должен совпадать с `model_id` стенда. `--mic-device` — индекс или подстрока имени входа PortAudio, если устройство по умолчанию не подходит. `--send-delay-ms` — пауза между чанками для файла и режима тишины по умолчанию. Вместо `--host`, `--port` и `--model` можно задать `STAND_HOST`, `STAND_PORT` и `STAND_MODEL`.
+
+Без `--audio` и `--mic` отправляется 5 секунд тишины; в конце печатается краткая сводка.
 
 По желанию: запись WAV в `test_audio/` через `utils/record_waw.py`.
