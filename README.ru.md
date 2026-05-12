@@ -12,7 +12,7 @@
 | `stand/server.py`   | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
 | `stand/client.py`   | Тестовый gRPC-клиент (файл / микрофон)                  |
 | `proto/sayo.proto`  | Контракт API; сгенерированные заглушки в `proto/`       |
-| `model_build.py`    | Сборка образов (`base` \| `model` \| `stand`)           |
+| `model_build.py`    | Сборка / push / pull образов (`base` \| `model` \| `stand` \| `push-model` \| `pull-model`) |
 | `Makefile`          | Команды сборки и `run-stand`                            |
 
 
@@ -20,7 +20,7 @@
 
 - `model.yaml` — `id`, `adapter`, `language_code`, `sample_rate`, `latency`, опционально `runtime` (например `chunk_duration_ms`, `audio_quantization`, `supports_interim_results`), `weights.artifacts`
 - `requirements.lock`, `system-packages.txt`
-- `weights/` — локальные веса (монтируются в контейнеры)
+- `weights/` — веса модели (запекаются в образ модели)
 
 ### Окружение
 
@@ -65,11 +65,50 @@ python model_build.py stand nemo
 
 ```bash
 docker run --gpus all \
-  -v /path/to/repo/models/nemo/weights:/app/models/nemo/weights \
   -p 50051:50051 \
   sayo-stand-nemo:latest \
   --model nemo --device cuda
 ```
+
+### Push / pull образа модели (registry)
+
+Веса лежат в `models/<name>/` и копируются в **образ модели** в `/app/models/<name>/`. В образе также есть один файл адаптера: `/app/model_repository/adapters/<adapter>.py`.
+
+**Push** (перетегировать локальный `sayo-model-<name>:latest` и отправить в registry):
+
+```bash
+python model_build.py push-model nemo --to ghcr.io/myorg/sayo-model-nemo:1.0.0
+# при необходимости: --from sayo-model-nemo:other
+```
+
+```bash
+make push-model MODEL=nemo TO=ghcr.io/myorg/sayo-model-nemo:1.0.0
+```
+
+**Pull** (скачать, при необходимости повесить тег `sayo-model-<name>:latest`, распаковать в репозиторий `models/<name>/` и `model_repository/adapters/`):
+
+```bash
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0
+# если в образе больше одной папки под /app/models — укажите имя:
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --as nemo
+# перезаписать уже существующие файлы в репозитории:
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --overwrite
+# не создавать локальный тег sayo-model-*; тогда укажите образ при сборке стенда:
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --no-retag
+python model_build.py stand nemo --model-image ghcr.io/myorg/sayo-model-nemo:1.0.0
+# образ уже есть локально (без docker pull):
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --no-pull
+# локальный образ без тега: укажите IMAGE ID или digest, либо сначала docker tag <id> repo/name:tag
+python model_build.py pull-model --from abc123def456 --no-pull --as gigaam
+```
+
+```bash
+make pull-model FROM=ghcr.io/myorg/sayo-model-nemo:1.0.0
+make pull-model FROM=ghcr.io/myorg/sayo-model-nemo:1.0.0 EXTRACT_MODEL=nemo OVERWRITE=1
+make pull-model FROM=ghcr.io/myorg/sayo-model-nemo:1.0.0 NO_PULL=1
+```
+
+В **Make** используйте **`EXTRACT_MODEL=...`**, а не `AS=...`: в GNU Make переменная `AS` зарезервирована (ассемблер `as`), из‑за этого `AS=nemo` превращается в `--as as`.
 
 Стенд загружает одну модель из `model.yaml`. **Ресемплируйте аудио на клиенте**, чтобы `StreamingConfig.sample_rate_hertz` совпадал с моделью (см. `HealthCheck` / `ModelDescriptor`).
 

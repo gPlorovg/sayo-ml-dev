@@ -11,14 +11,14 @@ Local tooling to scaffold STT models, build Docker images, and run a small **gRP
 | `stand/server.py` | gRPC `SayoService`: `HealthCheck`, `StreamingRecognize` |
 | `stand/client.py` | gRPC test client (file / mic) |
 | `proto/sayo.proto` | API contract; generated stubs in `proto/` |
-| `model_build.py` | Build Docker images (`base` \| `model` \| `stand`) |
+| `model_build.py` | Build/push/pull Docker images (`base` \| `model` \| `stand` \| `push-model` \| `pull-model`) |
 | `Makefile` | Shortcuts for builds and `run-stand` |
 
 ### Model directory (`models/<name>/`)
 
 - `model.yaml` — `id`, `adapter`, `language_code`, `sample_rate`, `latency`, optional `runtime` (e.g. `chunk_duration_ms`, `audio_quantization`, `supports_interim_results`), `weights.artifacts`
 - `requirements.lock`, `system-packages.txt`
-- `weights/` — local weights (mounted into containers)
+- `weights/` — model weights (baked into the model image)
 
 ### Environment
 
@@ -72,11 +72,50 @@ The model image keeps `apt` / `uv pip` layers when only `model.yaml` or the adap
 
 ```bash
 docker run --gpus all \
-  -v /path/to/repo/models/nemo/weights:/app/models/nemo/weights \
   -p 50051:50051 \
   sayo-stand-nemo:latest \
   --model nemo --device cuda
 ```
+
+### Push / pull model images (registry)
+
+Model weights live under `models/<name>/` and are copied into the **model** image at `/app/models/<name>/`. The image also contains one adapter file at `/app/model_repository/adapters/<adapter>.py`.
+
+**Push** (retag local `sayo-model-<name>:latest`, then push):
+
+```bash
+python model_build.py push-model nemo --to ghcr.io/myorg/sayo-model-nemo:1.0.0
+# optional: --from sayo-model-nemo:other
+```
+
+```bash
+make push-model MODEL=nemo TO=ghcr.io/myorg/sayo-model-nemo:1.0.0
+```
+
+**Pull** (pull from registry, tag as `sayo-model-<name>:latest` for local rebuilds, extract tree into the repo):
+
+```bash
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0
+# if the image has more than one directory under /app/models, set the name explicitly:
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --as nemo
+# replace existing working tree:
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --overwrite
+# keep only the remote tag (no local sayo-model-* tag); then pass it to stand build:
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --no-retag
+python model_build.py stand nemo --model-image ghcr.io/myorg/sayo-model-nemo:1.0.0
+# image already present locally (skip registry pull):
+python model_build.py pull-model --from ghcr.io/myorg/sayo-model-nemo:1.0.0 --no-pull
+# untagged local image: use image ID or digest, or tag first, e.g. docker tag <id> yvdik/sayo-model-gigaam:latest
+python model_build.py pull-model --from abc123def456 --no-pull --as gigaam
+```
+
+```bash
+make pull-model FROM=ghcr.io/myorg/sayo-model-nemo:1.0.0
+make pull-model FROM=ghcr.io/myorg/sayo-model-nemo:1.0.0 EXTRACT_MODEL=nemo OVERWRITE=1
+make pull-model FROM=ghcr.io/myorg/sayo-model-nemo:1.0.0 NO_PULL=1
+```
+
+Use **`EXTRACT_MODEL=...`** in Make (not `AS=...`): GNU Make defines `AS` as the assembler (`as`), so `AS=nemo` breaks and becomes `--as as`.
 
 The stand loads one model from `model.yaml`. **Resample audio on the client** so `StreamingConfig.sample_rate_hertz` matches the model (see `HealthCheck` / `ModelDescriptor`).
 
