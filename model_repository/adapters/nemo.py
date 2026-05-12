@@ -36,7 +36,6 @@ class _StreamingState:
     pre_encode_cache_size: int = 0
     previous_hypotheses: object = None
     pred_out_stream: object = None
-    last_prediction_len: int = 0
     preprocessor: object = None
 
 
@@ -50,6 +49,7 @@ class NemoAdapter(BaseSTTModel):
         self._decoder_type = "ctc"
         self._chunk_ms = 560
         self._chunk_samples = 8960
+        self._stream_transcript_max_chars = 150
 
     def load(self, config: STTConfig) -> None:
         nemo_asr = _require_nemo()
@@ -66,6 +66,8 @@ class NemoAdapter(BaseSTTModel):
                 int(config.sample_rate * self._chunk_ms / 1000),
             )
         )
+        _stmc = config.extra.get("stream_transcript_max_chars", 150)
+        self._stream_transcript_max_chars = int(_stmc) if _stmc is not None else 150
 
         weights = config.extra.get("weights", [])
         weight_path = weights[0] if isinstance(weights, list) and weights else None
@@ -77,6 +79,7 @@ class NemoAdapter(BaseSTTModel):
             decoder_type=self._decoder_type,
             chunk_ms=self._chunk_ms,
             chunk_samples=self._chunk_samples,
+            stream_transcript_max_chars=self._stream_transcript_max_chars,
             weight_path=weight_path,
         )
 
@@ -161,8 +164,7 @@ class NemoAdapter(BaseSTTModel):
         import torch
 
         self._reset_streaming_cache()
-        stream_state = self._stream
-        if stream_state is None:
+        if self._stream is None:
             raise RuntimeError("Streaming state is not initialized.")
 
         buffer = np.array([], dtype=np.float32)
@@ -185,11 +187,8 @@ class NemoAdapter(BaseSTTModel):
                 elapsed = time.perf_counter() - t0
                 final_full_text = full_text
 
-                new_text = full_text[stream_state.last_prediction_len :]
-                stream_state.last_prediction_len = len(full_text)
-
                 yield STTResult(
-                    transcript=new_text,
+                    transcript=self._clip_stream_transcript(full_text),
                     is_final=False,
                     confidence=0.0,
                     latency_ms=elapsed * 1000,
@@ -213,11 +212,9 @@ class NemoAdapter(BaseSTTModel):
             full_text = self._stream_step(torch.tensor(buffer, dtype=torch.float32))
             elapsed = time.perf_counter() - t0
             final_full_text = full_text
-            new_text = full_text[stream_state.last_prediction_len :]
-            stream_state.last_prediction_len = len(full_text)
 
             yield STTResult(
-                transcript=new_text,
+                transcript=self._clip_stream_transcript(full_text),
                 is_final=True,
                 confidence=0.0,
                 latency_ms=elapsed * 1000,
@@ -230,7 +227,7 @@ class NemoAdapter(BaseSTTModel):
         elif final_full_text:
             # No tail chunk, but stream had processed chunks.
             yield STTResult(
-                transcript="",
+                transcript=self._clip_stream_transcript(final_full_text),
                 is_final=True,
                 confidence=0.0,
                 latency_ms=0.0,
@@ -273,9 +270,16 @@ class NemoAdapter(BaseSTTModel):
             "decoder_type": self._decoder_type,
             "chunk_ms": self._chunk_ms,
             "chunk_samples": self._chunk_samples,
+            "stream_transcript_max_chars": self._stream_transcript_max_chars,
             "loaded": self.is_loaded,
             "streaming": True,
         }
+
+    def _clip_stream_transcript(self, text: str) -> str:
+        n = self._stream_transcript_max_chars
+        if n <= 0 or len(text) <= n:
+            return text
+        return text[-n:]
 
     def _stream_step(self, audio: "object") -> str:
         import torch
@@ -346,7 +350,6 @@ class NemoAdapter(BaseSTTModel):
         )
         stream_state.previous_hypotheses = None
         stream_state.pred_out_stream = None
-        stream_state.last_prediction_len = 0
 
     def _transcribe_array(self, audio: np.ndarray) -> str:
         hypotheses = self._model.transcribe(audio=[audio], batch_size=1)

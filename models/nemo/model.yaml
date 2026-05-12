@@ -21,6 +21,9 @@ decoder_type: "ctc"        # "rnnt" or "ctc"
 chunk_ms: 560               # lookahead (480) + encoder step (80)
 chunk_samples: 8960          # sample_rate * chunk_ms / 1000
 
+# Streaming: max length of transcript text (suffix of full hypothesis). 0 = no limit.
+stream_transcript_max_chars: 150
+
 # Model artifacts.
 # Dependencies are declared in files next to this config:
 #   - requirements.lock
