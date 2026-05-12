@@ -32,10 +32,6 @@ weights:
   revision: "v1"
   artifacts:
     - path: "weights/sayo.nemo"
-    # я не знаю как сделать sha256 и какую ссылку указать сейчас, пока хочу тестирование на локальной модели
-      # uri: "https://example.com/model.safetensors"
-      # sha256: "<checksum>"
-      # required: true
 
 # Runtime hints
 runtime:
