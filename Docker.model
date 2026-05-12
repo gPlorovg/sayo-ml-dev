@@ -24,13 +24,12 @@ RUN apt-get update && \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r /app/models/${MODEL_NAME}/requirements.lock
 
+# model.yaml and the rest of the model dir (including weights/).
+COPY models/${MODEL_NAME}/ /app/models/${MODEL_NAME}/
+
+# Copy code last so weight layer stays cached when code changes.
 COPY model_repository/__init__.py /app/model_repository/__init__.py
 COPY model_repository/base.py /app/model_repository/base.py
 COPY model_repository/model_repository.py /app/model_repository/model_repository.py
 COPY model_repository/adapters/__init__.py /app/model_repository/adapters/__init__.py
 COPY model_repository/adapters/${ADAPTER_NAME}.py /app/model_repository/adapters/${ADAPTER_NAME}.py
-
-# model.yaml and the rest of the model dir last (weights excluded via .dockerignore)
-COPY models/${MODEL_NAME}/ /app/models/${MODEL_NAME}/
-
-# The weights are expected to be mounted or preloaded at runtime.

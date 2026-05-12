@@ -24,10 +24,7 @@ latency: 0.0
 weights:
   revision: "v1"
   artifacts:
-    # - path: "weights/model.safetensors"
-    #   uri: "https://example.com/model.safetensors"
-    #   sha256: "<checksum>"
-    #   required: true
+    # - path: "weights/model.bin"
 
 # Runtime hints
 runtime:

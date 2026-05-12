@@ -57,7 +57,7 @@ I18N = {
         "step4": "make build-all MODEL={model_name}",
         "step4_desc": "  Or: python model_build.py base && python model_build.py model {model_name} && python model_build.py stand {model_name}",
         "step5": "make run-stand MODEL={model_name}",
-        "step5_desc": "  Or: docker run --gpus all -v /path/to/weights:/app/models/{model_name}/weights -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name} --device cuda",
+        "step5_desc": "  Or: docker run --gpus all -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name} --device cuda",
     },
     "ru": {
         "wizard_title": "[bold]Мастер добавления STT-модели[/bold]",
@@ -115,6 +115,6 @@ I18N = {
         "step4": "make build-all MODEL={model_name}",
         "step4_desc": "  Или: python model_build.py base && python model_build.py model {model_name} && python model_build.py stand {model_name}",
         "step5": "make run-stand MODEL={model_name}",
-        "step5_desc": "  Или: docker run --gpus all -v /path/to/weights:/app/models/{model_name}/weights -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name} --device cuda",
+        "step5_desc": "  Или: docker run --gpus all -p 50051:50051 sayo-stand-{model_name}:latest --model {model_name} --device cuda",
     },
 }
