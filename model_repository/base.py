@@ -69,10 +69,10 @@ class BaseSTTModel(ABC):
 
     Lifecycle::
 
-        adapter = SomeAdapter()      # lightweight construction
-        adapter.load(config)          # heavy: downloads / loads weights
+        adapter = SomeAdapter()
+        adapter.load(config)
         result  = adapter.transcribe(audio_np)
-        adapter.unload()              # frees VRAM / RAM
+        adapter.unload()
     """
 
     # ── Interface ────────────────────────────────────────────────────────

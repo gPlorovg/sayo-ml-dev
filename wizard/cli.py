@@ -605,12 +605,12 @@ def _print_result(result: ScaffoldResult) -> None:
 
     steps.append("  4. ", style="bold cyan")
     steps.append(_t("step4", model_name=result.model_params.name), style="bold white")
-    steps.append(_t("step4_desc"), style="dim")
+    steps.append(_t("step4_desc", model_name=result.model_params.name), style="dim")
     steps.append("\n")
 
     steps.append("  5. ", style="bold cyan")
     steps.append(_t("step5", model_name=result.model_params.name), style="bold white")
-    steps.append(_t("step5_desc"), style="dim")
+    steps.append(_t("step5_desc", model_name=result.model_params.name), style="dim")
 
     console.print(
         Panel(

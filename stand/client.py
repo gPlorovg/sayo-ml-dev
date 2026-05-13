@@ -27,6 +27,43 @@ from proto import sayo_pb2, sayo_pb2_grpc
 
 logger = structlog.get_logger("stand.client")
 
+_CONNECTION_STATUS_LABELS_RU: dict[str, str] = {
+    "config_accepted": "Проверка конфига…",
+    "allocating_session": "Выделение сессии…",
+    "actor_reserved": "Резервирование актора…",
+    "session_opening": "Подключение к модели…",
+    "connected": "Готово",
+    "error": "Ошибка",
+}
+
+
+def _connection_status_from_metadata(meta: dict[str, str]) -> str | None:
+    raw = meta.get("connection_status")
+    return raw if raw else None
+
+
+def _print_connection_status(meta: dict[str, str]) -> bool:
+    """Return True if this message is a connection-status update."""
+    status = _connection_status_from_metadata(meta)
+    if not status:
+        return False
+    label = _CONNECTION_STATUS_LABELS_RU.get(status, status)
+    session_id = meta.get("session_id", "")
+    model_id = meta.get("model_id", "")
+    actor_name = meta.get("actor_name", "")
+    detail = meta.get("detail", "")
+    suffix = ""
+    if session_id:
+        suffix += f" session_id={session_id}"
+    if model_id:
+        suffix += f" model_id={model_id}"
+    if actor_name:
+        suffix += f" actor={actor_name}"
+    if detail:
+        suffix += f" detail={detail}"
+    print(f"{label}{suffix}")
+    return True
+
 
 def _log_streaming_result_if_new(
     last_sig: list[tuple[str, bool] | None],
@@ -377,12 +414,15 @@ async def _mic_streaming_readwrite(
             if msg is grpc.aio.EOF:
                 await q.put(None)
                 break
+            meta = dict(msg.metadata)
+            if _print_connection_status(meta):
+                continue
             results.append(
                 {
                     "transcript": msg.transcript,
                     "is_final": msg.is_final,
                     "confidence": msg.confidence,
-                    "metadata": dict(msg.metadata),
+                    "metadata": meta,
                     "wall_s": round(time.perf_counter() - t0, 3),
                 }
             )
@@ -459,14 +499,21 @@ async def streaming_recognize(
     t0 = time.perf_counter()
     last_result_sig: list[tuple[str, bool] | None] = [None]
     gen = request_file()
+    connected = False
     try:
         async for response in stub.StreamingRecognize(gen):
+            meta = dict(response.metadata)
+            if _print_connection_status(meta):
+                if meta.get("connection_status") == "connected":
+                    connected = True
+                # Do not treat status-stream updates as recognition results.
+                continue
             results.append(
                 {
                     "transcript": response.transcript,
                     "is_final": response.is_final,
                     "confidence": response.confidence,
-                    "metadata": dict(response.metadata),
+                    "metadata": meta,
                     "wall_s": round(time.perf_counter() - t0, 3),
                 }
             )
@@ -479,6 +526,12 @@ async def streaming_recognize(
         logger.error(
             "StreamingRecognize failed", code=str(exc.code()), details=exc.details()
         )
+    finally:
+        if not mic_live and not connected:
+            logger.warning(
+                "stream_never_connected",
+                hint="Server did not emit connection_status=connected before stream ended.",
+            )
 
     logger.info("done", responses=len(results))
     return results

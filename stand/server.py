@@ -4,11 +4,15 @@ gRPC test stand server.
 Loads one model repository entry and exposes SayoService.
 """
 
+# ruff: noqa: E402 — repo root is inserted into sys.path before local imports.
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import os
+import sys
+import uuid
 from contextlib import suppress
 from queue import Queue
 from pathlib import Path
@@ -18,12 +22,14 @@ import grpc
 import numpy as np
 import structlog
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from model_repository.model_repository import ModelRepository
 from proto import sayo_pb2, sayo_pb2_grpc
 
 logger = structlog.get_logger("stand.server")
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class StandSayoService(sayo_pb2_grpc.SayoServiceServicer):
@@ -101,6 +107,32 @@ class StandSayoService(sayo_pb2_grpc.SayoServiceServicer):
         result_queue: asyncio.Queue[Any | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
         worker_task: asyncio.Task | None = None
+        session_id = uuid.uuid4().hex
+        connected = False
+
+        async def emit_connection_status(
+            status: str,
+            *,
+            is_final: bool = False,
+            detail: str | None = None,
+            actor_name: str | None = None,
+        ) -> None:
+            meta: dict[str, object] = {
+                "connection_status": status,
+                "session_id": session_id,
+                "model_id": self._model_entry.model_id,
+            }
+            if actor_name:
+                meta["actor_name"] = actor_name
+            if detail:
+                meta["detail"] = detail
+            yield_msg = self._safe_response(
+                transcript="",
+                is_final=is_final,
+                confidence=0.0,
+                metadata=meta,
+            )
+            yield yield_msg
 
         def run_adapter_stream() -> None:
             def chunk_iter():
@@ -192,9 +224,27 @@ class StandSayoService(sayo_pb2_grpc.SayoServiceServicer):
                             "Resample audio on client side before streaming.",
                         )
                         return
+
+                    # Connection lifecycle (mirrors gateway contract; stand has no remote actor).
+                    async for msg in emit_connection_status("config_accepted"):
+                        yield msg
+                    async for msg in emit_connection_status("allocating_session"):
+                        yield msg
+                    async for msg in emit_connection_status(
+                        "actor_reserved", actor_name="stand-local"
+                    ):
+                        yield msg
+                    async for msg in emit_connection_status("session_opening"):
+                        yield msg
+
                     worker_task = asyncio.create_task(
                         asyncio.to_thread(run_adapter_stream)
                     )
+                    connected = True
+                    async for msg in emit_connection_status(
+                        "connected", actor_name="stand-local"
+                    ):
+                        yield msg
                     continue
 
                 if not request.HasField("audio_chunk"):
@@ -262,7 +312,13 @@ class StandSayoService(sayo_pb2_grpc.SayoServiceServicer):
 
         except Exception as exc:
             logger.exception("StreamingRecognize failed", error=str(exc))
-            raise
+            # Emit an error status message before terminating the RPC with INTERNAL.
+            if config is not None and connected:
+                async for msg in emit_connection_status(
+                    "error", is_final=True, detail=str(exc), actor_name="stand-local"
+                ):
+                    yield msg
+            await context.abort(grpc.StatusCode.INTERNAL, str(exc))
         finally:
             input_queue.put(None)
             if worker_task is not None and not worker_task.done():
