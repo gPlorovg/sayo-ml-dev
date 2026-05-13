@@ -1,0 +1,10 @@
+# Ignore local git and editor files
+.git
+.gitignore
+.idea
+.cursor
+
+# Ignore virtual environments and caches
+.venv
+__pycache__
+*.pyc

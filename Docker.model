@@ -1,0 +1,35 @@
+# The base image can be overridden.
+ARG BASE_IMAGE=sayo-base:latest
+FROM ${BASE_IMAGE}
+
+# The model name is required as a build argument
+ARG MODEL_NAME
+ARG ADAPTER_NAME
+ENV MODEL_NAME=${MODEL_NAME}
+
+WORKDIR /app
+
+COPY models/${MODEL_NAME}/requirements.lock /app/models/${MODEL_NAME}/requirements.lock
+COPY models/${MODEL_NAME}/system-packages.txt /app/models/${MODEL_NAME}/system-packages.txt
+
+# Install system packages if the model declares any.
+RUN apt-get update && \
+    if [ -f /app/models/${MODEL_NAME}/system-packages.txt ]; then \
+      grep -Ev '^\s*#|^\s*$' /app/models/${MODEL_NAME}/system-packages.txt > /tmp/system_deps.txt; \
+      if [ -s /tmp/system_deps.txt ]; then xargs -a /tmp/system_deps.txt apt-get install -y --no-install-recommends; fi; \
+    fi && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies from lock file using uv.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r /app/models/${MODEL_NAME}/requirements.lock
+
+# model.yaml and the rest of the model dir (including weights/).
+COPY models/${MODEL_NAME}/ /app/models/${MODEL_NAME}/
+
+# Copy code last so weight layer stays cached when code changes.
+COPY model_repository/__init__.py /app/model_repository/__init__.py
+COPY model_repository/base.py /app/model_repository/base.py
+COPY model_repository/model_repository.py /app/model_repository/model_repository.py
+COPY model_repository/adapters/__init__.py /app/model_repository/adapters/__init__.py
+COPY model_repository/adapters/${ADAPTER_NAME}.py /app/model_repository/adapters/${ADAPTER_NAME}.py
